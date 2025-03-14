@@ -1,4 +1,62 @@
 # Modern-Data-Architectures
+
+## SUMMARY (IN PROGRESS)
+This project replicates the core logic of the Shazam app in a Big Data architecture using:
+
+- **Apache NiFi** – for ingestion, flow control and automation  
+- **Apache Kafka (planned)** – for distributed streaming (optional layer)  
+- **Apache Spark (next stage)** – for MP3 conversion and fingerprinting  
+- **Hadoop (HDFS)** – for storage
+- **yt-dlp + Python** – for gathering audio through API
+
+---
+
+## NIFI Architecture Flow
+
+### LEFT SIDE – Trigger & Song Downloader
+- `GetFile` – reads a song list `song_list.txt` file (You need to create it)  
+- `SplitText` – splits list into individual song search queries  
+- `ExecuteStreamCommand` – runs a Python script that uses `yt_dlp` to download `.webm` audio files into `/tmp/nifi_download`  
+
+### RIGHT SIDE – HDFS Uploader & Cleanup
+- `ListFile` – detects `.webm` files in the temp download directory  
+- `FetchFile` – reads actual files from disk  
+- `PutHDFS` – stores files into Hadoop `/lakehouse/bronze/webm`  
+- `ExecuteStreamCommand` (Cleanup) – deletes each `.webm` file after HDFS write to conserve disk space  
+
+---
+
+## Known Edge Case / Workaround
+
+**Issue:** After running the left-side processors, the right-side ingestion pipeline (`ListFile → FetchFile → PutHDFS`) sometimes does not trigger.
+
+**Workaround:**
+1. Stop all processors
+2. In `ListFile`, temporarily change **File Filter** from:
+   ```
+   .*\.webm
+   ```
+   → to:
+   ```
+   .*\.webm'
+   ```
+3. Run processors once
+4. Stop processors again
+5. Revert File Filter back to:
+   ```
+   .*\.webm
+   ```
+6. Run all processors again – everything resumes normally
+
+> *Might be caused by NiFi's internal file tracker cache not refreshing properly when new files are created during runtime. This workaround forces the cache to update and resume detection.*
+
+---
+
+## Next Steps (Mostly Finished Locally)
+- Add Spark job to convert `.webm → .mp3` (`/lakehouse/silver/audio_mp3`)
+- Apply Spark fingerprinting & song matching (already prototyped in notebook)
+- Add Kafka layer for real-time song ingestion at scale (Optional)
+
 ## **GitHub Setup Guide**
 
 ### (1) Generate an SSH Key
