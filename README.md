@@ -1,5 +1,8 @@
 # Modern-Data-Architectures
 
+## PREREQUISITE
+Every time you run this project in the VM, after closing the VM and shutting down all services, it seems to break hadoop and it will no longer start. I have a theory that it might be due to the external packages installed in order to do the audio conversion but I have yet to solve this.
+
 ## SUMMARY (IN PROGRESS)
 This project replicates the core logic of the Shazam app in a Big Data architecture using:
 
