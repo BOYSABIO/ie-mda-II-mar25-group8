@@ -3,6 +3,95 @@
 ## PREREQUISITE
 Every time you run this project in the VM, after closing the VM and shutting down all services, it seems to break hadoop and it will no longer start. I have a theory that it might be due to the external packages installed in order to do the audio conversion but I have yet to solve this.
 
+## Pipeline Status Update & Next Steps (March 2025)
+
+### Current Progress Summary
+
+- ✔️ Audio conversion from `.webm` to `.mp3` and binary storage in **HDFS Silver Layer** completed via Spark.
+- ✔️ Conversion logs saved in Parquet under `lakehouse/silver/logs/audio_conversion_logs/`.
+- ✔️ Local fingerprint generation now working successfully using `librosa`.
+- ✔️ `.npy` fingerprint files can be converted into `.parquet` and optionally pushed to HDFS manually.
+
+### Known Issues & Workarounds
+
+#### **NiFi File Detection Delay**
+**Issue:** After running the left-side processors, the right-side ingestion pipeline (`ListFile → FetchFile → PutHDFS`) sometimes does not trigger.
+
+**Workaround:**
+1. Stop all processors  
+2. In `ListFile`, temporarily change **File Filter** from:
+   ```
+   .*\.webm
+   ```
+   → to:
+   ```
+   .*\.webm'
+   ```
+3. Run processors once  
+4. Stop processors again  
+5. Revert File Filter back to:
+   ```
+   .*\.webm
+   ```
+6. Run all processors again – everything resumes normally
+
+> _Might be caused by NiFi's internal file tracker cache not refreshing properly when new files are created during runtime._
+
+#### **Writing `.npy`-based Fingerprints to HDFS via Spark**
+**Issue:** Writing large `.npy` fingerprint files as Parquet into HDFS via Spark results in out-of-memory errors or failed task stage due to high task size.
+
+**Workaround:**
+- Write `.parquet` files **locally** first using:
+  ```python
+  fingerprint_df.write.mode("overwrite").parquet("parquet/")
+  ```
+- Then manually upload into HDFS using:
+  ```bash
+  hdfs dfs -copyFromLocal parquet/ /warehouse/fingerprints/
+  ```
+
+---
+
+### Python Virtual Environment Setup (Recommended)
+
+Since some Python libraries like `librosa`, `yt-dlp`, `ffmpeg-python`, `matplotlib`, and `numpy` are not included in default Spark environments or may conflict with other system packages, it's highly recommended to use a **dedicated virtual environment** when working outside Spark (e.g., for downloading or fingerprinting).
+
+#### Steps:
+```bash
+python3 -m venv venv_audio
+source venv_audio/bin/activate
+
+# Install dependencies
+pip install yt-dlp librosa ffmpeg-python numpy matplotlib
+```
+
+Use this environment when running local Python scripts such as:
+- `song_downloader_and_fingerprinter.py`
+
+> Note: Spark itself won’t use this venv unless explicitly configured. This is intended for **preprocessing scripts outside Spark**.
+
+---
+
+### Next Steps
+
+- Limit audio download duration via YouTube API to ~30 seconds for smaller file sizes (reduce load on fingerprinting stage).
+- Finalize Shazam-style matching notebook:
+  - Load a short MP3 snippet
+  - Extract fingerprint
+  - Match against stored fingerprint database (using cosine similarity / hashing).
+- Store matching results in separate Parquet logs if needed.
+
+### Paths Summary
+- Fingerprints (.npy): `fingerprints/`
+- Converted Parquet Fingerprints (local): `parquet/`
+- HDFS (if manually copied): `hdfs://localhost:9000/warehouse/fingerprints/`
+
+---
+
+_This update summarizes our current stable implementation path and outlines how to continue development and optimization from here._
+
+---
+
 ## Data Ingestion Pipeline (NiFi + Python)
 
 ### Overview:
