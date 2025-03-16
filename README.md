@@ -3,31 +3,67 @@
 ## PREREQUISITE
 Every time you run this project in the VM, after closing the VM and shutting down all services, it seems to break hadoop and it will no longer start. I have a theory that it might be due to the external packages installed in order to do the audio conversion but I have yet to solve this.
 
-## SUMMARY (IN PROGRESS)
-This project replicates the core logic of the Shazam app in a Big Data architecture using:
+## Data Ingestion Pipeline (NiFi + Python)
 
-- **Apache NiFi** – for ingestion, flow control and automation  
-- **Apache Kafka (planned)** – for distributed streaming (optional layer)  
-- **Apache Spark (next stage)** – for MP3 conversion and fingerprinting  
-- **Hadoop (HDFS)** – for storage
-- **yt-dlp + Python** – for gathering audio through API
+### Overview:
+This stage is responsible for ingesting audio content from **YouTube**, converting it into `.webm` format, and saving it into **HDFS (Bronze Layer)** using **Apache NiFi** and custom **Python scripts**.
 
----
+### Tools Used:
+- **Apache NiFi** – Orchestrates the entire flow with processors.
+- **yt-dlp (YouTube Downloader)** – Fetches audio streams from YouTube.
+- **Hadoop HDFS** – Destination storage layer (`/lakehouse/bronze/webm/`).
 
-## NIFI Architecture Flow
+### Flow Architecture:
 
-### LEFT SIDE – Trigger & Song Downloader
-- `GetFile` – reads a song list `song_list.txt` file (You need to create it)  
-- `SplitText` – splits list into individual song search queries  
-- `ExecuteStreamCommand` – runs a Python script that uses `yt_dlp` to download `.webm` audio files into `/tmp/nifi_download`  
+#### LEFT SIDE: Trigger & Download
+| Processor              | Description                                                                 |
+|------------------------|------------------------------------------------------------------------------|
+| `GetFile`              | Loads a `song_list.txt` file with one song query per line                   |
+| `SplitText`            | Splits list into individual song queries (1 per FlowFile)                   |
+| `ExecuteStreamCommand` | Calls a Python script to download `.webm` files via **yt-dlp**              |
+| Output Directory       | Files are saved temporarily in `/tmp/nifi_download/` on local disk          |
 
-### RIGHT SIDE – HDFS Uploader & Cleanup
-- `ListFile` – detects `.webm` files in the temp download directory  
-- `FetchFile` – reads actual files from disk  
-- `PutHDFS` – stores files into Hadoop `/lakehouse/bronze/webm`  
-- `ExecuteStreamCommand` (Cleanup) – deletes each `.webm` file after HDFS write to conserve disk space  
- 
----
+#### RIGHT SIDE: Transfer to HDFS & Cleanup
+| Processor              | Description                                                                 |
+|------------------------|------------------------------------------------------------------------------|
+| `ListFile`             | Monitors `/tmp/nifi_download/` for new `.webm` files                        |
+| `FetchFile`            | Reads the files from local disk                                             |
+| `UpdateAttribute`      | Applies filename normalization before writing to HDFS                       |
+| `PutHDFS`              | Uploads each `.webm` to `hdfs://localhost:9000/lakehouse/bronze/webm/`      |
+| `ExecuteStreamCommand` (Cleanup) | Deletes `.webm` files from local disk after HDFS upload        |
+
+### Directory Structure:
+```
+/lakehouse/
+├── bronze/
+│   └── webm/              ← Raw audio files (.webm) downloaded from YouTube
+└── silver/
+    ├── mp3_binary/        ← Processed audio files in binary format (.mp3)
+    └── logs/              ← Conversion logs (Parquet)
+```
+
+### Filename Normalization (UpdateAttribute):
+To avoid special character issues (e.g., spaces, quotes, accents), NiFi uses an **`UpdateAttribute`** processor (placed **between `FetchFile` → `PutHDFS`**) with a custom **filename sanitization strategy**, such as:
+
+```regex
+[^A-Za-z0-9._-]
+```
+
+This replaces invalid characters with underscores to ensure compatibility across HDFS and downstream processing.
+
+You can configure the `UpdateAttribute` processor with:
+- **`filename` attribute override**:
+```text
+${filename:replaceAll('[^A-Za-z0-9._-]', '_')}
+```
+
+### Known Issues & Workarounds:
+| Issue | Resolution |
+|-------|------------|
+| `PutHDFS` uploads song_list.txt | Add a RouteOnAttribute or move `.txt` handling separately |
+| FlowFile loops continuously | Use `DeleteFile` after `GetFile`, or remove input file manually |
+| Cleanup script doesn't delete | Ensure `filename` and `absolute.path` are passed as environment variables |
+| Right-side processors don’t trigger | Temporary workaround: toggle ListFile's regex pattern (`.*\.webm → .*\.webm' → back`) to reset NiFi internal file state |
 
 ## Known Edge Case / Workaround
 
@@ -52,6 +88,81 @@ This project replicates the core logic of the Shazam app in a Big Data architect
 6. Run all processors again – everything resumes normally
 
 > *Might be caused by NiFi's internal file tracker cache not refreshing properly when new files are created during runtime. This workaround forces the cache to update and resume detection.*
+
+### Shareable NiFi Template
+Template Goes Here
+
+---
+
+## Notebook 2 – Audio Conversion to Binary & Storage in HDFS (Silver Layer)
+
+### Overview:
+This stage handles the transformation of `.webm` audio files (Bronze Layer) into `.mp3` format, converts them into binary content, and stores the results in **HDFS Silver Layer** in **Parquet format** for efficient downstream processing.
+
+### Input & Output Paths:
+- **Input**: `hdfs://localhost:9000/lakehouse/bronze/webm/`
+- **Output (Binary)**: `hdfs://localhost:9000/lakehouse/silver/mp3_binary/`
+- **Logs (Optional)**: `hdfs://localhost:9000/lakehouse/silver/logs/audio_conversion_logs/`
+
+### Core Logic Flow:
+1. Spark lists all `.webm` files directly from HDFS using Hadoop’s FileSystem API.
+2. Files are loaded **in parallel** via RDD and enriched with metadata (filename, size, etc.).
+3. Each file is **copied locally** from HDFS → `/tmp/webm_conversion/input/`.
+4. `ffmpeg` is used to convert `.webm` → `.mp3` (audio-only).
+5. The resulting `.mp3` is read in **binary format** (`read().encode()`).
+6. Spark writes binary audio + metadata as **Parquet files to Silver layer**.
+7. A separate Parquet-based **log table** tracks conversion status, errors, and timestamps.
+
+### Key Features:
+- Efficient parallelization using Spark RDDs.
+- Flexible, metadata-rich processing pipeline.
+- Spark-compatible binary storage via Parquet.
+- Logs and errors are traceable per file (including FFmpeg stderr output).
+- Optional schema-checking and directory guards (to handle Spark/HDFS edge cases).
+
+### Notes:
+- Conversion failures often stem from:
+  - Special characters in filenames
+  - File already exists (`ffmpeg` overwrite prompt)
+  - URISyntax errors (resolved via filename normalization from NiFi)
+- Directory cleanup between runs is advised to avoid residual files.
+- Reading the binary parquet in a Spark DataFrame shows binary audio content as `bytearray(...)`.
+
+### Sample Schema of Binary DataFrame:
+| filename                          | size     | content (binary)   | timestamp | status  | message            |
+|----------------------------------|----------|--------------------|-----------|---------|---------------------|
+| Ed_Sheeran_Shape_Of_You.mp3      | 4171750  | bytearray(...)     | ...       | Success | Converted & Stored  |
+
+### Log Sample:
+| filename         | status | message                            | timestamp |
+|------------------|--------|------------------------------------|-----------|
+| songname.mp3     | Failed | File exists / Conversion Error     | ...       |
+
+---
+
+## SUMMARY (IN PROGRESS)
+This project replicates the core logic of the Shazam app in a Big Data architecture using:
+
+- **Apache NiFi** – for ingestion, flow control and automation  
+- **Apache Kafka (planned)** – for distributed streaming (optional layer)  
+- **Apache Spark (next stage)** – for MP3 conversion and fingerprinting  
+- **Hadoop (HDFS)** – for storage
+- **yt-dlp + Python** – for gathering audio through API
+
+---
+
+## NIFI Architecture Flow
+
+### LEFT SIDE – Trigger & Song Downloader
+- `GetFile` – reads a song list `song_list.txt` file (You need to create it)  
+- `SplitText` – splits list into individual song search queries  
+- `ExecuteStreamCommand` – runs a Python script that uses `yt_dlp` to download `.webm` audio files into `/tmp/nifi_download`  
+
+### RIGHT SIDE – HDFS Uploader & Cleanup
+- `ListFile` – detects `.webm` files in the temp download directory  
+- `FetchFile` – reads actual files from disk  
+- `PutHDFS` – stores files into Hadoop `/lakehouse/bronze/webm`  
+- `ExecuteStreamCommand` (Cleanup) – deletes each `.webm` file after HDFS write to conserve disk space  
 
 ---
 
