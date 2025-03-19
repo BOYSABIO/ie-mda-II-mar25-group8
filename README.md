@@ -3,6 +3,115 @@
 ## PREREQUISITE
 Every time you run this project in the VM, after closing the VM and shutting down all services, it seems to break hadoop and it will no longer start. I have a theory that it might be due to the external packages installed in order to do the audio conversion but I have yet to solve this.
 
+# Audio Fingerprinting & Matching Pipeline (Shazam-like System)
+
+This project implements a full-scale audio fingerprinting and matching pipeline inspired by Shazam — built using **Apache Spark**, **Databricks**, and **Librosa**. It enables you to process, fingerprint, hash, and match audio clips efficiently in a big data environment.
+
+---
+
+## 🚀 Project Goals
+
+- Extract audio clips from YouTube using `yt_dlp`
+- Convert to MP3, fingerprint using `librosa`, and hash using `SHA256`
+- Store data in a structured **Bronze → Silver → Gold** lakehouse architecture
+- Match a query clip against a song database and compute **confidence scores**
+
+---
+
+## Pipeline Architecture
+
+| Stage        | Description                                                                 |
+|--------------|------------------------------------------------------------------------------|
+| **Bronze**   | Raw MP3 downloads from YouTube                                              |
+| **Silver**   | Flattened audio fingerprints (frequency & time bins)                        |
+| **Gold**     | Hashed fingerprints for fast lookup and efficient storage                   |
+| **Staging**  | Temporary clip fingerprints for matching queries                            |
+
+---
+
+## 📒 Notebook Breakdown
+
+### `Notebook 1: Audio Downloading & Logging`
+- Download audio using `yt_dlp`
+- Save MP3s to `dbfs:/FileStore/bronze/mp3/`
+- Log metadata in Spark DataFrame (`song_name`, `status`, `timestamp`)
+- Write logs to CSV/Delta for audit
+
+### `Notebook 2: Fingerprint Extraction`
+- Extract spectrogram peaks using `librosa`
+- Flatten fingerprints (freq bin, time bin)
+- Save to `dbfs:/FileStore/silver/flattened_fingerprints/`
+
+### `Notebook 3: Fingerprint Hashing`
+- Use Spark functions `concat_ws()` + `sha2()` to hash each fingerprint
+- Store hashed fingerprints in Delta format at `dbfs:/FileStore/gold/fingerprint_hashes/`
+
+### `Notebook 4: Clip Fingerprinting (Staging)`
+- Download a song
+- Extract a **10–20 sec audio clip**
+- Fingerprint and hash the clip
+- Save hashed clip fingerprint to `dbfs:/FileStore/staging/fingerprint_clips/`
+
+### `Notebook 5: Clip Matching + Confidence Scoring`
+- Match hashed clip against **Gold database**
+- Join on `fingerprint_hash`, count matches per song
+- Compute **confidence score = (matches / total clip hashes) * 100**
+- Rank top matches
+
+---
+
+## Technologies Used
+
+- **Apache Spark**
+- **Databricks Lakehouse (Delta Tables)**
+- **Librosa** (Spectrogram + Fingerprint extraction)
+- **yt_dlp** (YouTube audio downloader)
+- **Python (Pandas, NumPy, hashlib)**
+
+---
+
+## DBFS Directory Structure
+
+```
+/FileStore/
+  └── bronze/
+      └── mp3/
+      └── download_logs/
+  └── silver/
+      └── flattened_fingerprints/
+  └── gold/
+      └── fingerprint_hashes/
+  └── staging/
+      └── clips/
+      └── fingerprint_clips/
+      └── match_results/
+```
+
+---
+
+## Further Project Ideas
+
+**Future Recommendations**
+
+### Option A: Lightweight Web App (Frontend UI)
+- Simple **Streamlit or Flask app**
+- User uploads a clip or types a song name
+- Backend runs matching pipeline or calls Databricks via API
+- UI displays **best match + confidence score**
+
+### Option B: Expose a REST API via Databricks Jobs or MLflow
+- Wrap matching logic into a **Databricks Job**
+- Trigger the job via REST endpoint
+- Return results in JSON format
+- Easily integrate into external systems or dashboards
+
+### Option C: Build a mobile or desktop interface
+- Users record/choose a song clip from their device
+- Send clip to backend API
+- Receive best match in real time
+
+---
+
 ## Pipeline Status Update & Next Steps (March 2025)
 
 ### Current Progress Summary
