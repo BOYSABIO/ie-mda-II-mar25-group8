@@ -1,8 +1,3 @@
-# Modern-Data-Architectures
-
-## PREREQUISITE
-Every time you run this project in the VM, after closing the VM and shutting down all services, it seems to break hadoop and it will no longer start. I have a theory that it might be due to the external packages installed in order to do the audio conversion but I have yet to solve this.
-
 # Audio Fingerprinting & Matching Pipeline (Shazam-like System)
 
 This project implements a full-scale audio fingerprinting and matching pipeline inspired by Shazam — built using **Apache Spark**, **Databricks**, and **Librosa**. It enables you to process, fingerprint, hash, and match audio clips efficiently in a big data environment.
@@ -112,7 +107,10 @@ This project implements a full-scale audio fingerprinting and matching pipeline 
 
 ---
 
-## Pipeline Status Update & Next Steps (March 2025)
+## Archive VM (State before swittching to databricks)
+
+### PREREQUISITE
+Every time you run this project in the VM, after closing the VM and shutting down all services, it seems to break hadoop and it will no longer start. I have a theory that it might be due to the external packages installed in order to do the audio conversion but I have yet to solve this.
 
 ### Current Progress Summary
 
