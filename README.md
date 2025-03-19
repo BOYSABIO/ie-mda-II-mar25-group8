@@ -9,7 +9,7 @@ This project implements a full-scale audio fingerprinting and matching pipeline 
 
 ---
 
-## 🚀 Project Goals
+## Project Goals
 
 - Extract audio clips from YouTube using `yt_dlp`
 - Convert to MP3, fingerprint using `librosa`, and hash using `SHA256`
@@ -29,7 +29,7 @@ This project implements a full-scale audio fingerprinting and matching pipeline 
 
 ---
 
-## 📒 Notebook Breakdown
+## Notebook Breakdown
 
 ### `Notebook 1: Audio Downloading & Logging`
 - Download audio using `yt_dlp`
