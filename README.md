@@ -15,6 +15,7 @@ This project implements a full-scale audio fingerprinting and matching pipeline 
   
 ## Documentation
 
+- [Slide Deck](docs/MDA_Group8_Project.pdf)
 - [Setup Guide](docs/setup_guide.md)
 - [Pipeline Architecture](docs/architecture.md)
 - [Notebook Breakdown](docs/notebook_breakdown.md)
